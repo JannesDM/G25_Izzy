@@ -92,6 +92,10 @@ PROC awaitVBI
 		ret				; return
 ENDP awaitVBI
 
+;program to ananlyse picture to pixels pallette -> python
+; advanced features (complex) power-ups,...
+; collision (rectangles) then (1. rectangles then pixel per pixel (transparent))
+
 ; input handler
 PROC handleInput
 	uses eax
