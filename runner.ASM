@@ -13,7 +13,7 @@ P386
 MODEL FLAT, C
 ASSUME cs:_TEXT,ds:FLAT,es:FLAT,fs:FLAT,gs:FLAT
 
-;INCLUDE "keyb.inc"
+INCLUDE "keyb.inc"
 
 ; compile-time constants (with macros)
 VMEMADR EQU 0A0000h	; video memory address
@@ -30,8 +30,28 @@ SPRITESIZE EQU SPRITEWIDTH*SPRITEHEIGHT
 
 TRANSPARANT = 0 ; pallette index for pixels that are transparant
 
+KEYCNT EQU 4		; number of keys to track ; length of array
+
 ; -------------------------------------------------------------------
 CODESEG
+
+;----------------------------------------------------------------------------
+;; Helper functions
+
+; Print string.
+PROC printString
+	ARG @@string_pointer:dword
+	USES eax, edx
+
+	; ??
+	;call setVideoMode, 13h
+
+	mov ah, 09h
+	mov edx, [@@string_pointer]
+	int 21h
+
+	ret
+ENDP printString
 
 ; Set the video mode
 PROC setVideoMode
@@ -44,115 +64,14 @@ PROC setVideoMode
 	ret
 ENDP setVideoMode
 
-; check for a specific termination keystroke.
-PROC checkForTermination
-	ARG 	@@key:byte
-	USES 	eax
-
-	mov	ah, 01h
-	int	16h
-	cmp	al,[@@key]
-	
-	jne	@@continue
-	call terminateProcess
-	
-	@@continue:
-	ret
-ENDP checkForTermination
-
-
 ; wait for any key
 PROC waitForKey
-;	ARG 	@@key:byte
-	USES 	eax
+	USES eax
 
 	mov	ah, 00h ; get keystroke
 	int	16h
 	ret
 ENDP waitForKey
-
-; ------------------------------------------------------------------------------------------------------------
-; wait for Vertical Blank Interval (VBI)
-; (= period during which the beam moves back to its starting position)
-; copied from compendium
-; DANCER VBI?
-PROC awaitVBI
-	uses eax, edx
-
-	MOV DX, 03DAH 		; VGA status port
-	@@waitForEnd:		; ?
-		IN AL, DX		; ?
-		AND AL, 8 		; third bit is set during VBI
-		JNZ @@waitForEnd	; jump if ?
-	@@waitForBegin:		; ?
-		IN AL, DX		; ?
-		AND AL, 8		; ?
-		JZ @@waitForBegin	; jump if ?
-
-		ret				; return
-ENDP awaitVBI
-
-;program to ananlyse picture to pixels pallette -> python
-; advanced features (complex) power-ups,...
-; collision (rectangles) then (1. rectangles then pixel per pixel (transparent))
-
-; input handler
-PROC handleInput
-	uses eax
-
-	; interrupt 16h
-
-	ret
-ENDP handleInput
-
-; updates game status
-PROC updateGameStatus
-	;uses eax
-
-	; eg move player
-
-	ret
-ENDP updateGameStatus
-
-; updates game status
-PROC redrawScreen
-	;uses eax
-
-	; eg @@obstacles ...
-
-	ret
-ENDP redrawScreen
-
-; Game loop
-; timing: synchronize gameLoop with VBI
-PROC gameLoop
-	@@gameLoop:
-		call awaitVBI				; ?
-		
-		;call   		; ?
-		
-		;call handleInput			; handles input
-		;call updateGameStatus		; updates game status
-		
-		;call redrawScreen			; redraw screen
-
-		call awaitVBI				; ?
-		;CMP AL, DEAD				; ?
-		;JNE @@gameLoop
-		jmp @@gameLoop
-
-	;@@dead:
-
-
-
-	;@@GAMELOOP:
-		;call clearKeyboardBuffer
-	
-		;call wait_VBLANK
-		;jmp @@GAMELOOP
-	
-	ret
-ENDP gameLoop
 
 ;-----------------------------------------------------------------------------------------------------------
 ; Update the colour palette.
@@ -180,6 +99,42 @@ PROC updateColourPalette
 	ret
 ENDP updateColourPalette
 
+;;----------------------------------------------------------------------------
+;; Input functions
+;;
+
+; Loops over set of keys to look if they are pressed
+; add a key:
+; 	1. increase KEYCNT
+; 	2. add key scancode to array in datasegment
+PROC checkKeys
+	USES eax, ebx, ecx, edx
+
+	mov ecx, KEYCNT
+	mov al, [__keyb_rawScanCode]
+
+@@looper:
+	cmp al, [arrKeyCode + ecx - 1]
+	jne @@next
+
+	lea ebx, [arrPrintValues + 8 * (ecx-1)] ; 8 / string
+
+	call printString, ebx
+	
+	jmp @@end
+
+@@next:
+	;call printString, offset msg
+	loop @@looper
+
+@@end:
+	ret
+ENDP checkKeys
+
+;;----------------------------------------------------------------------------
+
+; -------------------------------------------------------------------
+; TIMING MANAGEMENT
 ; Terminate the program.
 PROC terminateProcess
 	USES eax
@@ -208,6 +163,29 @@ proc wait_VBLANK
 	
 	ret 
 endp wait_VBLANK
+
+;; SAME AS ABOVE??
+
+; wait for Vertical Blank Interval (VBI)
+;(= period during which the beam moves back to its starting position)
+; copied from compendium
+PROC awaitVBI
+	uses eax, edx
+
+	MOV DX, 03DAH 		; VGA status port
+	@@waitForEnd:		; ?
+		IN AL, DX		; ?
+		AND AL, 8 		; third bit is set during VBI
+		JNZ @@waitForEnd	; jump if ?
+	@@waitForBegin:		; ?
+		IN AL, DX		; ?
+		AND AL, 8		; ?
+		JZ @@waitForBegin	; jump if ?
+
+		ret				; return
+ENDP awaitVBI
+
+; -------------------------------------------------------------------
 
 ; -------------------------------------------------------------------
 ; FILE HANDLING: BASED ON DANCER.ASM FROM EXAMPLES (some parts heavily edited by now)
@@ -392,9 +370,25 @@ PROC main
 	push ds
 	pop	es
 
+	call __keyb_installKeyboardHandler
+	
 	call setVideoMode, 13h
 	call updateColourPalette, 66
 
+@@gameLoop:	
+	call checkKeys
+
+	
+	;call awaitVBI				; timing
+
+	;; loop end test
+	; Wait for keystroke and read character.
+	mov     al, [__keyb_rawScanCode] ; last pressed key
+	cmp     al, 01h
+	jne      @@gameLoop 	; check if ESC is pressed, otherwise keep looping
+
+
+;; 	
 	call readImage, offset filename_frame, offset packedframe, FRAMESIZE
 	call readImage, offset filename_frame_2, offset packedframe_2, FRAMESIZE
 	call readImage, offset filename_sprite_1, offset sprite_1_data, SPRITESIZE
@@ -404,13 +398,13 @@ PROC main
 	
 	call renderSprite, VMEMADR, offset sprite_1_data, 0, 0
 	call waitForKey
-
+	
 	call renderSprite, VMEMADR, offset sprite_1_data, 50, 160
 	call waitForKey
-
+	
 	call expandPackedFrame, VMEMADR, offset packedframe_2
 	call waitForKey
-
+	
 	call expandPackedFrame, VMEMADR, offset packedframe
 	call waitForKey
 
@@ -423,6 +417,16 @@ ENDP main
 
 ; -------------------------------------------------------------------
 DATASEG
+	msg	db "waiting...", 13, 10, '$'
+	
+	; keyboard scancodes when pressed down
+	arrKeyCode db 48h, 50h, 4Bh, 4Dh ; UP, DOWN, LEFT, RIGHT
+	
+	; spaces so strings are same length
+	arrPrintValues 	db "up   ", 13, 10, '$' 
+					db "down ", 13, 10, '$' 
+			 		db "left ", 13, 10, '$' 
+					db "right", 13, 10, '$'
 
 	palette		db 0, 0, 0	
 				db 1, 1, 1
